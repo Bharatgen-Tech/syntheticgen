@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Generated outputs
+test_output/
+test_output_*/
+output/
+*.jsonl.tmp
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Env
+.env
+.venv/
+venv/
+
+# Logs
+*.log
+slurm_logs/
+
+# Model artifacts
+*.sqsh
+*.tar
+spill_d/

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synthgen"
+version = "0.1.0"
+description = "Model-agnostic, pipeline-agnostic synthetic data generation on Ray + vLLM"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+    "aiofiles",
+    "ray",
+    "vllm",
+]
+
+[project.scripts]
+synthgen = "synthgen.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["synthgen*"]

@@ -1,0 +1,2 @@
+{"text": "The Linux kernel scheduler uses CFS (Completely Fair Scheduler) as its default. CFS tracks virtual runtime for each task and runs the task with the smallest vruntime next. This gives an approximation of ideal multitasking where every task gets exactly 1/N of CPU time."}
+{"text": "PostgreSQL MVCC (Multi-Version Concurrency Control) allows readers and writers to operate without blocking each other. Each transaction sees a snapshot of the database at its start time. Old row versions are cleaned up by VACUUM."}

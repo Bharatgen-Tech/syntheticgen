@@ -1,0 +1,16 @@
+name: summary
+flow: linear
+
+stages:
+  - name: summary
+    system_prompt: "You are a concise technical writer."
+    prompt: |
+      Summarize the following text in 3-5 sentences:
+
+      {seed.text}
+    decoding:
+      temperature: 0.3
+      max_tokens: 512
+
+merge:
+  template: "{summary}"
