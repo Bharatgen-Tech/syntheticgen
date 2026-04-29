@@ -65,6 +65,21 @@ if ray is not None:
                 pass
             return f"GPUs={self._gpu_ids}"
 
+        async def shutdown(self) -> str:
+            """Gracefully stop vLLM engine: stops EngineCore + worker subprocs."""
+            try:
+                if hasattr(self._engine, "shutdown"):
+                    self._engine.shutdown()
+                if hasattr(self._engine, "_run_workers"):
+                    try:
+                        self._engine._run_workers("shutdown")
+                    except Exception:
+                        pass
+                self._engine = None
+            except Exception as e:
+                print(f"[REPLICA] shutdown error (non-fatal): {e}")
+            return f"shutdown GPUs={self._gpu_ids}"
+
         async def generate(
             self,
             system_prompt: str,
@@ -203,9 +218,27 @@ class RayNativeEngine(InferenceEngine):
     async def close(self) -> None:
         if self._tps_task:
             self._tps_task.cancel()
+        # Graceful shutdown first so vLLM tears down its EngineCore + Worker subprocs.
+        # Without this, ray.kill orphans them and they keep holding GPU memory.
+        if self._replicas:
+            print(f"[ENGINE] Shutting down {len(self._replicas)} replica(s) gracefully...")
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        *[r.shutdown.remote() for r in self._replicas],
+                        return_exceptions=True,
+                    ),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                print("[ENGINE] Shutdown timeout — proceeding with hard kill.")
         for r in self._replicas:
-            ray.kill(r)
+            try:
+                ray.kill(r)
+            except Exception:
+                pass
         self._replicas.clear()
+        print("[ENGINE] All replicas terminated.")
 
     def _remove_replica(self, idx: int):
         print(f"[WARN] Removing dead replica {idx} "

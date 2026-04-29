@@ -1,100 +1,47 @@
 # synthgen
 
-Model-agnostic, pipeline-agnostic synthetic data generation on Ray + vLLM.
-
-Define your pipeline in YAML, point at a model and a seed file, and scale from 1 GPU to N nodes with the same command.
-
-## Layout
+Generate synthetic data at scale. You write a YAML describing what the model should do with your seed data; synthgen handles the GPUs, batching, retries, resume, and scaling from 1 GPU to many nodes.
 
 ```
-synthgen/
-  engine.py            RayNativeEngine: multi-replica vLLM, NodeAffinity, fault tolerance, probe-gated startup
-  writer.py            AsyncBufferedWriter: batched JSONL
-  runner.py            Ray init, multi-node wait, seed loading, resume, orchestration
-  pipeline.py          Pipeline + StageSpec + YAML loader + template renderer
-  utils.py             Shared: token budgeting, context truncation, JSON repair, retry wrapper
-  cli.py               `synthgen run pipeline.yaml ...`
-  flows/
-    linear.py          Sequential stage executor (with fanout support)
-    think_execute.py   Pipelined think-execute overlap (port of async_lc.py mode2) — TODO
-  pipelines/
-    summary.yaml       Minimal single-stage smoke test
+seeds.jsonl  +  pipeline.yaml  ──►  synthgen  ──►  output.jsonl
 ```
 
-## Quick start — single node
+## Who this is for
+
+- You have a list of inputs (documents, questions, code snippets, anything with text) and you want an LLM to transform each one into a richer output — summaries, Q&A pairs, long-form answers, critiques, rewrites, whatever.
+- You want to run this on **your own GPUs** (1 to N nodes), not pay per-token.
+- You don't want to reimplement batching / fault tolerance / resume / multi-node plumbing.
+
+## 5-minute quickstart
 
 ```bash
-python -m synthgen.cli run synthgen/pipelines/summary.yaml \
-  --model Qwen/Qwen3-Coder-Next \
-  --input seeds.jsonl \
-  --output out/corpus.jsonl \
-  --intermediate out/debug.jsonl \
-  --num_replicas 2 \
-  --tensor_parallel_size 4 \
-  --gpus_per_replica 4 \
-  --gpu_memory_utilization 0.92 \
-  --max_workers 256 \
-  --max_seed_concurrency 128 \
-  --enforce_eager
+git clone https://github.com/Bharatgen-Tech/syntheticgen.git
+cd syntheticgen
+pip install -e .
+
+# Try it on a tiny example (3 seeds, produces Q&A pairs):
+bash examples/qa_generation/run.sh
 ```
 
-## Multi-node (N nodes)
+Output appears at `examples/qa_generation/out/qa.jsonl`. That's it.
 
-Start Ray on head + workers, then:
+Needs: Python 3.10+, a GPU with vLLM-compatible drivers, and the model weights for whatever you're running (`Qwen/Qwen3-Coder-Next` by default).
 
-```bash
-python -m synthgen.cli run synthgen/pipelines/summary.yaml \
-  --model Qwen/Qwen3-Coder-Next \
-  --input seeds.jsonl \
-  --output out/corpus.jsonl \
-  --intermediate out/debug.jsonl \
-  --ray_address auto \
-  --num_nodes 4 \
-  --replicas_per_node 2 \
-  --tensor_parallel_size 4 \
-  --gpus_per_replica 4 \
-  --gpu_memory_utilization 0.92 \
-  --max_workers 512 \
-  --max_seed_concurrency 256 \
-  --max_num_seqs 512 \
-  --enable_expert_parallel \
-  --enforce_eager
-```
+## Where to go next
 
-## Pipeline YAML
+| You want to... | Read |
+|---|---|
+| Install and run your first pipeline end-to-end | [docs/01-getting-started.md](docs/01-getting-started.md) |
+| Build a pipeline for your own use case | [docs/02-build-a-pipeline.md](docs/02-build-a-pipeline.md) |
+| Run across multiple GPU nodes | [docs/03-scale-up.md](docs/03-scale-up.md) |
+| Write custom Python logic beyond YAML | [docs/04-custom-flows.md](docs/04-custom-flows.md) |
+| Look up a CLI flag or YAML field | [docs/05-reference.md](docs/05-reference.md) |
 
-```yaml
-name: my_pipeline
-flow: linear            # or 'think_execute'
+## Examples in this repo
 
-stages:
-  - name: draft
-    system_prompt: "You are a helpful writer."
-    prompt: |
-      Seed: {seed.text}
-      Write a draft.
-    decoding: { temperature: 0.3, max_tokens: 4096 }
-
-  - name: critique
-    inputs: [draft]     # documentation; template vars work either way
-    prompt: |
-      Draft: {draft}
-      List 3 weaknesses.
-    decoding: { temperature: 0.3, max_tokens: 1024, parse: json }
-
-  - name: revisions
-    fanout: critique    # run once per critique item
-    prompt: |
-      Issue: {item}
-      Propose a fix.
-    decoding: { max_tokens: 512 }
-
-merge:
-  template: "{draft}\n\n# Critique\n{critique}\n\n# Revisions\n{revisions}"
-```
-
-New use case = new YAML. No code changes.
+- [`examples/qa_generation/`](examples/qa_generation/) — one input → list of concepts → Q&A per concept (demonstrates fanout + JSON parsing)
+- [`examples/long_context/`](examples/long_context/) — full long-context pipeline, each seed becomes a 30K-word technical document (demonstrates the pipelined think-execute flow)
 
 ## Status
 
-Phase 1 done (engine/writer/runner/pipeline/linear). `think_execute` flow still needs porting from `long_context_generation/async_lc.py`.
+v0.1.0. Core engine + single-node and multi-node validated on H100 clusters. Contributions welcome — see [docs/04-custom-flows.md](docs/04-custom-flows.md).

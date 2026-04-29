@@ -48,6 +48,11 @@ def _init_ray(args) -> None:
     ray_kwargs: dict[str, Any] = {"ignore_reinit_error": True}
     if args.ray_address:
         ray_kwargs["address"] = args.ray_address
+    else:
+        # Force local instance. Without this, Ray auto-discovers stale pointers
+        # at /tmp/ray/ray_current_cluster from prior multi-node runs and hangs
+        # trying to connect to a dead head.
+        ray_kwargs["address"] = "local"
     if runtime_env is not None:
         ray_kwargs["runtime_env"] = runtime_env
     if args.spill_dir and not args.ray_address:
@@ -167,24 +172,11 @@ async def run(args, pipeline: Pipeline) -> None:
 
     Flow-agnostic: `pipeline` provides the stage spec + a flow instance that
     knows how to execute a single seed.
+
+    Startup order is deliberate: seeds + resume first, then Ray + engine —
+    so a fully-resumed run skips the expensive vLLM warmup entirely.
     """
-    # ── Ray + engine ───────────────────────────────────────────────────────
-    _init_ray(args)
-    engine = _build_engine(args)
-    await engine.start()
-
-    # ── I/O setup ──────────────────────────────────────────────────────────
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    os.makedirs(os.path.dirname(os.path.abspath(args.intermediate)), exist_ok=True)
-    if not os.path.exists(args.intermediate):
-        open(args.intermediate, "w").close()
-
-    output_writer = AsyncBufferedWriter(args.output)
-    intermediate_writer = AsyncBufferedWriter(args.intermediate)
-    await output_writer.start()
-    await intermediate_writer.start()
-
-    # ── Seeds + resume ─────────────────────────────────────────────────────
+    # ── Seeds + resume (no GPU needed) ─────────────────────────────────────
     seeds = _load_seeds(args.input)
     print(f"[INFO] Loaded {len(seeds):,} seeds from '{args.input}'")
 
@@ -199,10 +191,24 @@ async def run(args, pipeline: Pipeline) -> None:
 
     print(f"[INFO] {len(pending):,} seed(s) to process.")
     if not pending:
-        await output_writer.close()
-        await intermediate_writer.close()
-        await engine.close()
+        print("[INFO] Nothing to do — skipping engine setup. Done.")
         return
+
+    # ── Ray + engine (slow: weight load + JIT compile) ─────────────────────
+    _init_ray(args)
+    engine = _build_engine(args)
+    await engine.start()
+
+    # ── I/O setup ──────────────────────────────────────────────────────────
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.intermediate)), exist_ok=True)
+    if not os.path.exists(args.intermediate):
+        open(args.intermediate, "w").close()
+
+    output_writer = AsyncBufferedWriter(args.output)
+    intermediate_writer = AsyncBufferedWriter(args.intermediate)
+    await output_writer.start()
+    await intermediate_writer.start()
 
     # ── Run pipeline per seed ──────────────────────────────────────────────
     seed_semaphore = asyncio.Semaphore(args.max_seed_concurrency)

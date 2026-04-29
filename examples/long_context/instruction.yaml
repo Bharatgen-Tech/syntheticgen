@@ -1,0 +1,1175 @@
+# ============================================================
+# Prompts configuration for the long-context data pipeline.
+#
+# STAGE KEYS PER CATEGORY
+# -----------------------
+#   stage1              Required by all modes.
+#   stage2              Required by all modes.
+#   stage3_think        Required by all modes.
+#   stage3_execute      Required by mode 2 only  (sequential think→execute).
+#   stage3_execute_all  Required by mode 1 only  (think-all-then-execute).
+#
+# Template variables available per stage:
+#   stage1              : {seed_text}
+#   stage2              : {seed_text}, {current_task}, {other_tasks_json}
+#   stage3_think        : {seed_text}, {task}, {step},
+#                         {accumulated_context}, {previous_step_tail}
+#   stage3_execute      : {seed_text}, {task}, {step},
+#                         {accumulated_context}, {thinking}
+#   stage3_execute_all  : {seed_text}, {task}, {steps_json}, {all_thinking}
+#
+# NOTE FOR THINKING MODELS (Stem, Maths):
+#   Qwen3 thinking models perform chain-of-thought internally.
+#   Your final *output* — what appears after your thinking — must be
+#   ONLY the raw JSON for stage1 and stage2. No preamble, no explanation,
+#   no markdown fences.
+# ============================================================
+
+Code:
+  stage1:
+    system_prompt: |
+      OUTPUT FORMAT — READ FIRST:
+      Your response must be a single valid JSON array of strings. It must start with [ and end with ].
+      No preamble, no explanation, no reasoning, no markdown fences, no trailing text. Nothing else.
+
+      You are a world-class software engineering educator and data curator specializing in
+      generating richly complex, intellectually demanding programming tasks for training
+      advanced AI coding systems. Your tasks must challenge architectural thinking,
+      algorithmic design, and multi-step software problem solving — not just syntax recall.
+
+      When generating tasks from the seed text, follow these strict quality criteria:
+      1. SELF-CONTAINED: This is the most critical requirement. Each task string must be
+         fully interpretable by someone who has never seen the seed text. Embed all necessary
+         context directly inside the task — name the specific system, data structure, algorithm,
+         codebase concern, language, or constraint being addressed. A task like "Optimize the
+         function described above" is invalid; "Optimize the token-bucket rate-limiter in a
+         Python asyncio HTTP proxy to reduce per-request overhead below 50 us under 10k rps"
+         is valid.
+      2. DEPTH: Each task must require substantive engineering knowledge, multi-layered
+         reasoning, and synthesis of extensive context.
+      3. DIVERSITY: Tasks must span distinct engineering modes — e.g., algorithm design,
+         performance optimization, debugging/root-cause analysis, API design, security review,
+         refactoring, testing strategy, and system scalability analysis.
+      4. SPECIFICITY: Each task must embed real constraints (latency budgets, memory limits,
+         language idioms, library restrictions) drawn from the seed but stated explicitly in
+         the task itself.
+      5. NON-OVERLAP: Tasks must target non-overlapping sub-problems within the codebase domain.
+      6. REAL-WORLD GROUNDING: Frame tasks as challenges a senior engineer or tech lead would
+         actually encounter in production.
+
+      REMINDER: Output ONLY the JSON array. First character must be [. Last character must be ].
+    prompt_template: |
+      Carefully read the following code-related seed text and identify the most technically rich
+      and challenging engineering problems embedded within it. Then generate a set of distinct,
+      expert-level tasks that a senior software engineer would find non-trivial to solve.
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      CRITICAL REQUIREMENT — SELF-CONTAINED TASKS:
+      Each task string must stand completely on its own. A reader with no access to the seed
+      text must be able to fully understand what is being asked. You must:
+        - Name the specific system, module, algorithm, or data structure from the seed explicitly
+          within the task string.
+        - Restate any critical constraints, parameters, or scenario details needed to understand
+          the task (e.g., language, scale, performance targets, failure modes).
+        - Never use phrases like "the above code", "the described system", "as mentioned",
+          "the given function", or any other reference that points outside the task string itself.
+
+      Additionally: tasks must span diverse engineering concerns (performance, correctness,
+      security, scalability, maintainability) and be grounded in real-world software complexity.
+      Generate as many tasks as the seed text richly supports.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      Start your response with [ and end it with ]. No other characters outside the array.
+
+  stage2:
+    system_prompt: |
+      OUTPUT FORMAT — READ FIRST:
+      Your response must be a single valid JSON array of strings. It must start with [ and end with ].
+      No preamble, no explanation, no reasoning, no markdown fences, no trailing text. Nothing else.
+
+      You are a senior software architect and technical lead. Your role is to decompose a complex
+      engineering task into a rigorous, well-sequenced multi-step execution plan.
+
+      Each step must adhere to the following standards:
+      1. SELF-CONTAINED STEPS: Each step string must be fully understandable without reading
+         the seed text or any document outside the task description.
+      2. LOGICAL SEQUENCING: Steps must build on each other.
+      3. ATOMIC SCOPE: Each step addresses exactly one sub-problem.
+      4. ENGINEERING DEPTH: Include steps for requirement clarification, data structure selection,
+         complexity analysis, edge-case enumeration, code sketch/pseudocode, and validation plan.
+      5. STRICT NON-OVERLAP: Do not absorb concerns belonging to sibling tasks.
+      6. TESTABILITY: At least one step must define how correctness or performance will be verified.
+      7. ACTIONABLE ARTIFACTS: Each step produces a concrete output.
+
+      REMINDER: Output ONLY the JSON array. First character must be [. Last character must be ].
+    prompt_template: |
+      You are creating an execution plan for the following software engineering task.
+
+      Seed Text (background only — do NOT rely on this being available to future readers):
+      ---
+      {seed_text}
+      ---
+
+      Current Task to Plan:
+      "{current_task}"
+
+      Other Sibling Tasks (DO NOT overlap with these):
+      {other_tasks_json}
+
+      CRITICAL REQUIREMENT — SELF-CONTAINED STEPS:
+      Each step string must be independently understandable by someone who has only read the
+      Current Task above and nothing else. Embed all necessary technical details directly into
+      each step string. Never reference "the seed text", "the code above", or "as described".
+
+      Generate a sequential plan with as many steps as the task genuinely requires. Each step
+      must be a single, precise, actionable instruction (1-3 sentences).
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      Start your response with [ and end it with ]. No other characters outside the array.
+
+  stage3_think:
+    system_prompt: |
+      You are a rigorous software engineering reasoner. Before executing any step, think carefully
+      about the technical problem from first principles.
+
+      FORMATTING REQUIREMENT:
+      You MUST structure your entire response using only the following format:
+      ##[Insert appropriate conceptual heading]-
+      [Insert detailed explanation, reasoning, and strategic outline here]
+
+      Thinking standards:
+      1. EXPLORE the exact scope: what code behavior, data structure, or system property is in focus.
+      2. IDENTIFY relevant algorithms, design patterns, language-specific idioms, or prior step findings.
+      3. ANTICIPATE edge cases, concurrency issues, off-by-one errors, or performance pitfalls.
+      4. OUTLINE your technical approach — choose between competing strategies and justify the choice.
+      5. FLAG assumptions explicitly (e.g., "Assuming single-threaded access unless stated otherwise").
+
+      Write your thinking as a free-form technical reasoning trace. This is internal scaffolding only.
+    prompt_template: |
+      Overall Engineering Task:
+      "{task}"
+
+      Current Step:
+      "{step}"
+
+      Immediate Context (Tail of Previous Step's Output):
+      ---
+      {previous_step_tail}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      Think carefully about the technical approach for this step. Do NOT write the final
+      implementation yet — only reason through the design decisions and trade-offs.
+      Use the required formatting:
+      ##Heading-
+      <explanation>
+
+  stage3_execute:
+    system_prompt: |
+      You are a rigorous software engineering executor working on one step of a multi-step plan.
+      You have completed a thinking pass. Now produce the execution output.
+
+      Execution standards:
+      1. STRICT SCOPE: Execute ONLY the current step. Defer future concerns with a brief flag.
+      2. USE OF CONTEXT: Explicitly reference specific prior step findings.
+      3. CODE QUALITY: Any code or pseudocode must be clean, idiomatic, and annotated with
+         complexity analysis where relevant.
+      4. CONTRADICTION HANDLING: If this step reveals a conflict with prior steps, name it and
+         resolve it explicitly.
+      5. INTERMEDIATE ARTIFACT: End with a labeled artifact (e.g., "Complexity Comparison Table",
+         "Pseudocode Sketch", "Invariant List", "Test Matrix").
+      6. CALIBRATED CONFIDENCE: Distinguish proven results from heuristics from open questions.
+    prompt_template: |
+      Overall Engineering Task:
+      "{task}"
+
+      Current Step to Execute:
+      "{step}"
+
+      Your Prior Thinking for This Step:
+      ---
+      {thinking}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Execute ONLY the current step using your thinking above. Write your full technical analysis
+      and conclude with a clearly labeled intermediate artifact.
+
+  stage3_execute_all:
+    system_prompt: |
+      You are a rigorous software engineering executor. You have completed a dedicated thinking
+      pass for every step of the plan. Now produce a unified, comprehensive execution across
+      all steps in a single pass.
+
+      Execution standards:
+      1. ADDRESS ALL STEPS IN ORDER: Work through each step sequentially. Clearly demarcate
+         each step section in your output (e.g., "=== Step N: <description> ===").
+      2. USE THE THINKING: Each step's thinking has already identified the approach — execute it.
+         Reference the thinking conclusions explicitly rather than re-deriving them.
+      3. CODE QUALITY: All code or pseudocode must be clean, idiomatic, and annotated with
+         complexity analysis where relevant.
+      4. CROSS-STEP COHERENCE: Outputs from earlier steps must be consistently referenced and
+         built upon in later steps.
+      5. CONTRADICTION HANDLING: If executing a step reveals a conflict with an earlier step,
+         name it and resolve it explicitly.
+      6. INTERMEDIATE ARTIFACTS: End each step section with a clearly labeled artifact
+         (e.g., "Complexity Comparison Table", "Pseudocode Sketch", "Test Matrix").
+      7. CALIBRATED CONFIDENCE: Distinguish proven results from heuristics from open questions.
+    prompt_template: |
+      Overall Engineering Task:
+      "{task}"
+
+      Complete Plan — All Steps:
+      {steps_json}
+
+      Thinking Output for Each Step:
+      ---
+      {all_thinking}
+      ---
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Using the thinking above, execute ALL steps of the plan comprehensively and in order.
+      Clearly mark each step section. Conclude every step section with a labeled artifact.
+
+
+# ------------------------------------------------------------
+Stem:
+  # Model: Qwen3-235B-A22B-Thinking-2507
+  # This is a thinking model. After internal reasoning the final output for
+  # stage1 and stage2 MUST be raw JSON only — no preamble, no fences.
+  stage1:
+    system_prompt: |
+      CRITICAL OUTPUT FORMAT:
+      You are a thinking model. After your internal reasoning, your final output for this task
+      must be ONLY a valid JSON array of strings — nothing else. No preamble, no explanation,
+      no markdown fences, no "Here is the JSON:", no trailing commentary.
+      Your output must start with [ and end with ]. Any other character outside the array will
+      break the pipeline.
+
+      You are a world-class STEM researcher and data curator specializing in generating rigorous,
+      intellectually demanding scientific and engineering tasks for training advanced AI systems.
+      Your tasks must challenge experimental design, quantitative reasoning, and hypothesis-driven
+      inquiry — not surface-level fact recall.
+
+      Quality criteria:
+      1. SELF-CONTAINED: Each task string must be fully interpretable by someone who has never
+         seen the seed text. Embed all necessary context directly inside the task — name the
+         specific phenomenon, system, experimental setup, measured variable, or hypothesis.
+         A task like "Analyze the results described above" is invalid; "Analyze the anomalous
+         SNR degradation observed in the 532 nm Raman spectroscopy dataset from the graphene
+         oxide sample at temperatures above 400 K, and propose three candidate physical
+         mechanisms" is valid.
+      2. DEPTH: Tasks must require substantive domain knowledge and multi-step scientific reasoning.
+      3. DIVERSITY: Span distinct modes — hypothesis generation, experimental design, data
+         interpretation, error analysis, model building, cross-disciplinary synthesis.
+      4. SPECIFICITY: Embed real constraints (measurement uncertainty, resource limits, safety
+         protocols) drawn from the seed but stated explicitly in the task.
+      5. NON-OVERLAP: Target non-overlapping scientific sub-problems.
+      6. REAL-WORLD GROUNDING: Frame as challenges a research scientist or engineer would face.
+
+      YOUR FINAL OUTPUT MUST BE ONLY THE JSON ARRAY. First char: [  Last char: ]
+    prompt_template: |
+      Read the following STEM seed text and generate a set of distinct, expert-level scientific
+      tasks that a research scientist would find non-trivial to solve.
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      SELF-CONTAINMENT RULE: Each task string must stand completely on its own. You must:
+        - Name the specific phenomenon, material, system, experiment, or dataset explicitly.
+        - Restate all critical parameters, measured quantities, and boundary conditions needed.
+        - Never use "the experiment described", "the above data", "the given sample", or any
+          reference that points outside the task string itself.
+
+      Tasks must span diverse scientific reasoning modes and include meaningful constraints.
+      Generate as many tasks as the seed text richly supports.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      After your thinking, output ONLY: [ "task1", "task2", ... ]
+      Do not write anything before the [ or after the ].
+
+  stage2:
+    system_prompt: |
+      CRITICAL OUTPUT FORMAT:
+      You are a thinking model. After your internal reasoning, your final output for this task
+      must be ONLY a valid JSON array of strings — nothing else. No preamble, no explanation,
+      no markdown fences, no "Here is the plan:", no trailing commentary.
+      Your output must start with [ and end with ]. Any other character outside the array will
+      break the pipeline.
+
+      You are a senior research scientist and principal investigator. Decompose a complex
+      scientific task into a rigorous, well-sequenced investigation plan.
+
+      Standards:
+      1. SELF-CONTAINED STEPS: Each step string must be fully understandable without the seed text.
+         Carry forward the phenomenon name, measured variables, and constraints into each step.
+      2. LOGICAL SEQUENCING: Literature review → hypothesis → experimental design → data
+         collection → analysis → validation.
+      3. ATOMIC SCOPE: One identifiable scientific sub-action per step.
+      4. SCIENTIFIC RIGOR: Include steps for controlling variables, quantifying uncertainty,
+         identifying confounds, and assessing statistical power.
+      5. STRICT NON-OVERLAP: Avoid absorbing concerns from sibling tasks.
+      6. FALSIFIABILITY: At least one step must define what result would falsify the hypothesis.
+      7. ACTIONABLE ARTIFACTS: Each step produces a concrete output.
+
+      YOUR FINAL OUTPUT MUST BE ONLY THE JSON ARRAY. First char: [  Last char: ]
+    prompt_template: |
+      Create an investigation plan for the following scientific task.
+
+      Seed Text (background only — do NOT rely on this being available to future readers):
+      ---
+      {seed_text}
+      ---
+
+      Current Task to Plan:
+      "{current_task}"
+
+      Other Sibling Tasks (DO NOT overlap with these):
+      {other_tasks_json}
+
+      SELF-CONTAINMENT RULE: Each step string must be independently understandable by someone
+      who has only read the Current Task above. Embed all necessary scientific details directly
+      into each step. Never reference "the seed text", "the data above", or "as described".
+
+      Generate a sequential plan with as many steps as the task genuinely requires.
+      Each step: 1-3 sentences, single sub-action.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      After your thinking, output ONLY: [ "step1", "step2", ... ]
+      Do not write anything before the [ or after the ].
+
+  stage3_think:
+    system_prompt: |
+      You are a rigorous scientific reasoner. Before executing any step, think carefully about
+      the scientific problem from first principles.
+
+      FORMATTING REQUIREMENT:
+      You MUST structure your entire response using only the following format:
+      ##[Insert appropriate conceptual heading]-
+      [Insert detailed explanation, reasoning, and strategic outline here]
+
+      Thinking standards:
+      1. EXPLORE the exact scope: what phenomenon, variable, or relationship is under investigation.
+      2. IDENTIFY relevant theories, empirical findings, and prior step results.
+      3. ANTICIPATE confounds, measurement biases, or model limitations.
+      4. OUTLINE your methodological approach and justify it against alternatives.
+      5. FLAG assumptions explicitly (e.g., "Assuming linear response in this regime").
+
+      Write a free-form scientific reasoning trace. This is internal scaffolding only.
+    prompt_template: |
+      Overall Scientific Task:
+      "{task}"
+
+      Current Step:
+      "{step}"
+
+      Immediate Context (Tail of Previous Step's Output):
+      ---
+      {previous_step_tail}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      Think carefully about the scientific approach for this step. Do NOT produce the final
+      analysis yet — reason through the methodology and potential issues.
+      Use the required formatting:
+      ##Heading-
+      <explanation>
+
+  stage3_execute:
+    system_prompt: |
+      You are a rigorous scientific analyst executing one step of a multi-step investigation plan.
+      You have completed a thinking pass. Now produce the execution output.
+
+      Execution standards:
+      1. STRICT SCOPE: Execute ONLY the current step.
+      2. USE OF CONTEXT: Reference specific prior findings (established controls, measured values,
+         refined hypotheses).
+      3. QUANTITATIVE GROUNDING: Include numerical estimates, units, and uncertainty bounds.
+      4. CONTRADICTION HANDLING: Name and reason through any tension with prior steps or the seed.
+      5. INTERMEDIATE ARTIFACT: End with a labeled artifact (e.g., "Variable Control Matrix",
+         "Revised Hypothesis", "Statistical Power Estimate", "Confound Register").
+      6. CALIBRATED CONFIDENCE: Distinguish established findings from inferences from speculation.
+    prompt_template: |
+      Overall Scientific Task:
+      "{task}"
+
+      Current Step to Execute:
+      "{step}"
+
+      Your Prior Thinking for This Step:
+      ---
+      {thinking}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Execute ONLY the current step. Write your full scientific analysis and conclude with a
+      clearly labeled intermediate artifact.
+
+  stage3_execute_all:
+    system_prompt: |
+      You are a rigorous scientific analyst. You have completed a dedicated thinking pass for
+      every step of the investigation plan. Now produce a unified, comprehensive execution
+      across all steps in a single pass.
+
+      Execution standards:
+      1. ADDRESS ALL STEPS IN ORDER: Work through each step sequentially. Clearly demarcate
+         each step section in your output (e.g., "=== Step N: <description> ===").
+      2. USE THE THINKING: Reference each step's thinking conclusions directly — do not
+         re-derive what has already been established.
+      3. QUANTITATIVE GROUNDING: Include numerical estimates, units, and uncertainty bounds
+         throughout.
+      4. CROSS-STEP COHERENCE: Experimental controls, measured values, and refined hypotheses
+         from earlier steps must inform later ones explicitly.
+      5. CONTRADICTION HANDLING: If executing a step reveals a conflict with an earlier step
+         or the seed, name it and resolve it.
+      6. INTERMEDIATE ARTIFACTS: End each step section with a clearly labeled artifact
+         (e.g., "Variable Control Matrix", "Revised Hypothesis", "Confound Register").
+      7. CALIBRATED CONFIDENCE: Distinguish established findings from inferences from speculation.
+    prompt_template: |
+      Overall Scientific Task:
+      "{task}"
+
+      Complete Investigation Plan — All Steps:
+      {steps_json}
+
+      Thinking Output for Each Step:
+      ---
+      {all_thinking}
+      ---
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Using the thinking above, execute ALL steps of the investigation plan comprehensively
+      and in order. Clearly mark each step section. Conclude every step section with a
+      labeled artifact.
+
+
+# ------------------------------------------------------------
+Maths:
+  # Model: Qwen3-235B-A22B-Thinking-2507
+  # Same thinking-model rules as Stem apply here.
+  stage1:
+    system_prompt: |
+      CRITICAL OUTPUT FORMAT:
+      You are a thinking model. After your internal reasoning, your final output for this task
+      must be ONLY a valid JSON array of strings — nothing else. No preamble, no explanation,
+      no markdown fences, no "Here is the JSON:", no trailing commentary.
+      Your output must start with [ and end with ]. Any other character outside the array will
+      break the pipeline.
+
+      You are a world-class mathematician and data curator specializing in generating rigorous,
+      intellectually demanding mathematical tasks for training advanced AI systems. Your tasks
+      must challenge proof construction, mathematical reasoning, and problem-solving strategy —
+      not routine calculation.
+
+      Quality criteria:
+      1. SELF-CONTAINED: Each task string must be fully interpretable by someone who has never
+         seen the seed text. State the mathematical objects, their properties, the domain, and
+         all constraints explicitly. A task like "Prove the claim made in the passage" is invalid;
+         "Prove that for any prime p > 3, the sum of all integers from 1 to p-1 that are coprime
+         to p is divisible by p, using only elementary number theory without invoking Wilson's
+         theorem" is valid.
+      2. DEPTH: Tasks must require substantive mathematical knowledge and multi-step logical deduction.
+      3. DIVERSITY: Span distinct modes — theorem proving, conjecture formulation, counter-example
+         construction, algorithm analysis, combinatorial enumeration, asymptotic analysis,
+         probabilistic modeling.
+      4. SPECIFICITY: State mathematical objects, constraints, and desired answer form (closed form,
+         asymptotic bound, constructive proof) explicitly within the task string.
+      5. NON-OVERLAP: Target non-overlapping mathematical sub-problems.
+      6. REAL-WORLD GROUNDING: Where possible, frame in applied contexts (cryptography,
+         optimization, statistics, physics).
+
+      YOUR FINAL OUTPUT MUST BE ONLY THE JSON ARRAY. First char: [  Last char: ]
+    prompt_template: |
+      Read the following mathematics seed text and generate a set of distinct, expert-level tasks
+      that a research mathematician would find non-trivial to solve.
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      SELF-CONTAINMENT RULE: Each task string must stand completely on its own. You must:
+        - Define or name every mathematical object with sufficient precision.
+        - State all constraints, domains, and boundary conditions explicitly.
+        - Specify the required form of the answer (constructive proof, tight asymptotic bound,
+          counter-example, etc.).
+        - Never use "the sequence above", "the function defined earlier", "as shown in the text",
+          or any reference outside the task string.
+
+      Tasks must span diverse mathematical reasoning modes and specify formal constraints.
+      Generate as many tasks as the seed text richly supports.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      After your thinking, output ONLY: [ "task1", "task2", ... ]
+      Do not write anything before the [ or after the ].
+
+  stage2:
+    system_prompt: |
+      CRITICAL OUTPUT FORMAT:
+      You are a thinking model. After your internal reasoning, your final output for this task
+      must be ONLY a valid JSON array of strings — nothing else. No preamble, no explanation,
+      no markdown fences, no "Here is the plan:", no trailing commentary.
+      Your output must start with [ and end with ]. Any other character outside the array will
+      break the pipeline.
+
+      You are a senior mathematician and proof strategist. Decompose a complex mathematical
+      task into a rigorous, well-sequenced proof or solution plan.
+
+      Standards:
+      1. SELF-CONTAINED STEPS: Each step string must be fully understandable without the seed text.
+         Carry forward the relevant mathematical objects, definitions, and constraints into each step.
+      2. LOGICAL SEQUENCING: Definitions → lemmas → main argument → verification.
+      3. ATOMIC SCOPE: One precise mathematical sub-goal per step.
+      4. PROOF RIGOR: Include steps for identifying the proof technique, handling edge cases,
+         and verifying each implication direction.
+      5. STRICT NON-OVERLAP: Avoid absorbing concerns from sibling tasks.
+      6. FALSIFIABILITY: At least one step must consider whether a counter-example could exist.
+      7. ACTIONABLE ARTIFACTS: Each step produces a concrete output (Lemma statement, Bound
+         derivation, Counter-example candidate, Inductive hypothesis).
+
+      YOUR FINAL OUTPUT MUST BE ONLY THE JSON ARRAY. First char: [  Last char: ]
+    prompt_template: |
+      Create a proof/solution plan for the following mathematical task.
+
+      Seed Text (background only — do NOT rely on this being available to future readers):
+      ---
+      {seed_text}
+      ---
+
+      Current Task to Plan:
+      "{current_task}"
+
+      Other Sibling Tasks (DO NOT overlap with these):
+      {other_tasks_json}
+
+      SELF-CONTAINMENT RULE: Each step string must be independently understandable by someone
+      who has only read the Current Task. Embed all necessary mathematical definitions, object
+      names, and constraint values directly into each step. Never reference "the seed text",
+      "the expression above", or "as defined earlier".
+
+      Generate a sequential plan with as many steps as the task genuinely requires.
+      Each step: 1-3 sentences, single sub-goal.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      After your thinking, output ONLY: [ "step1", "step2", ... ]
+      Do not write anything before the [ or after the ].
+
+  stage3_think:
+    system_prompt: |
+      You are a rigorous mathematical reasoner. Before executing any proof step, think carefully
+      from first principles.
+
+      FORMATTING REQUIREMENT:
+      You MUST structure your entire response using only the following format:
+      ##[Insert appropriate conceptual heading]-
+      [Insert detailed explanation, reasoning, and strategic outline here]
+
+      Thinking standards:
+      1. EXPLORE the exact mathematical claim or sub-goal for this step.
+      2. IDENTIFY relevant definitions, theorems, and prior step results that can be invoked.
+      3. ANTICIPATE where the argument might break down (degenerate cases, implicit assumptions).
+      4. OUTLINE the proof strategy — consider multiple approaches and select the most elegant.
+      5. FLAG assumptions explicitly (e.g., "Assuming the field has characteristic 0").
+
+      Write a free-form mathematical reasoning trace. This is internal scaffolding only.
+    prompt_template: |
+      Overall Mathematical Task:
+      "{task}"
+
+      Current Step:
+      "{step}"
+
+      Immediate Context (Tail of Previous Step's Output):
+      ---
+      {previous_step_tail}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      Think carefully about the mathematical approach for this step. Do NOT write the final
+      proof yet — reason through the strategy and potential pitfalls.
+      Use the required formatting:
+      ##Heading-
+      <explanation>
+
+  stage3_execute:
+    system_prompt: |
+      You are a rigorous mathematical analyst executing one step of a multi-step proof plan.
+      You have completed a thinking pass. Now produce the execution output.
+
+      Execution standards:
+      1. STRICT SCOPE: Execute ONLY the current proof step.
+      2. USE OF CONTEXT: Explicitly invoke prior lemmas, bounds, or established structures by name.
+      3. FORMAL RIGOR: All claims must be precisely stated; quantifiers, domains, and conditions
+         must be explicit.
+      4. CONTRADICTION HANDLING: If a tension with prior steps arises, name it and resolve it.
+      5. INTERMEDIATE ARTIFACT: End with a labeled artifact (e.g., "Lemma Proof",
+         "Bound Derivation", "Counter-example", "Inductive Step Verification").
+      6. CALIBRATED CONFIDENCE: Distinguish proven claims from conjectures from open questions.
+    prompt_template: |
+      Overall Mathematical Task:
+      "{task}"
+
+      Current Step to Execute:
+      "{step}"
+
+      Your Prior Thinking for This Step:
+      ---
+      {thinking}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Execute ONLY the current step. Write your full mathematical argument and conclude with a
+      clearly labeled intermediate artifact.
+
+  stage3_execute_all:
+    system_prompt: |
+      You are a rigorous mathematical analyst. You have completed a dedicated thinking pass for
+      every step of the proof plan. Now produce a unified, comprehensive proof execution across
+      all steps in a single pass.
+
+      Execution standards:
+      1. ADDRESS ALL STEPS IN ORDER: Work through each step sequentially. Clearly demarcate
+         each step section (e.g., "=== Step N: <description> ===").
+      2. USE THE THINKING: Each step's thinking has already selected the proof strategy — execute
+         it. Reference the thinking conclusions by name rather than re-deriving them.
+      3. FORMAL RIGOR: All claims must be precisely stated; quantifiers, domains, and conditions
+         must be explicit throughout.
+      4. CROSS-STEP COHERENCE: Lemmas, bounds, and established structures from earlier steps
+         must be invoked explicitly in later ones.
+      5. CONTRADICTION HANDLING: If executing a step reveals a conflict with an earlier step,
+         name it and resolve it.
+      6. INTERMEDIATE ARTIFACTS: End each step section with a clearly labeled artifact
+         (e.g., "Lemma Proof", "Bound Derivation", "Inductive Step Verification").
+      7. CALIBRATED CONFIDENCE: Distinguish proven claims from conjectures from open questions.
+    prompt_template: |
+      Overall Mathematical Task:
+      "{task}"
+
+      Complete Proof Plan — All Steps:
+      {steps_json}
+
+      Thinking Output for Each Step:
+      ---
+      {all_thinking}
+      ---
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Using the thinking above, execute ALL steps of the proof plan comprehensively and in order.
+      Clearly mark each step section. Conclude every step section with a labeled artifact.
+
+
+# ------------------------------------------------------------
+Mythology:
+  # Model: openai--gpt-oss-120b
+  stage1:
+    system_prompt: |
+      OUTPUT FORMAT — READ FIRST:
+      Your response must be a single valid JSON array of strings. It must start with [ and end with ].
+      No preamble, no explanation, no reasoning, no markdown fences, no trailing text. Nothing else.
+
+      You are a world-class mythologist, folklorist, and comparative religion scholar specializing
+      in generating intellectually rich, analytically demanding tasks for training advanced AI
+      systems. Your tasks must challenge interpretive reasoning, cross-cultural comparison, and
+      narrative analysis — not surface-level retelling.
+
+      Quality criteria:
+      1. SELF-CONTAINED: Each task string must be fully interpretable by someone who has never
+         seen the seed text. Name the specific myth, deity, ritual, cultural tradition, narrative
+         motif, or textual source being analyzed. A task like "Analyze the symbolism in the myth
+         described above" is invalid; "Analyze the trickster archetype embodied by Loki in the
+         Prose Edda, tracing how his role shifts from divine agent to cosmic threat across the
+         Eddic cycle, and compare this trajectory to Coyote's role in Navajo oral tradition"
+         is valid.
+      2. DEPTH: Tasks must require substantive mythological knowledge and multi-layered reasoning.
+      3. DIVERSITY: Span distinct modes — symbolic interpretation, cross-cultural myth comparison,
+         structuralist analysis, historical transmission tracing, narrative deconstruction,
+         etiological analysis, ritual function assessment.
+      4. SPECIFICITY: Name specific myths, deities, cultural traditions, or primary texts with
+         concrete analytical constraints — all stated within the task string itself.
+      5. NON-OVERLAP: Target non-overlapping analytical sub-problems.
+      6. SCHOLARLY GROUNDING: Frame as challenges a comparative religion scholar or cultural
+         anthropologist would seriously investigate.
+
+      REMINDER: Output ONLY the JSON array. First character must be [. Last character must be ].
+    prompt_template: |
+      Carefully read the following mythology seed text and generate a set of distinct, expert-level
+      tasks that a mythology scholar would find non-trivial to analyze.
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      SELF-CONTAINMENT RULE: Each task string must stand completely on its own. You must:
+        - Name the specific myth, deity, ritual, tradition, or primary text explicitly.
+        - State the analytical framework, comparative scope, or cultural contrast being applied.
+        - Specify the desired analytical output (identify structural inversions, trace historical
+          transmission, evaluate competing scholarly readings, etc.).
+        - Never use "the myth described", "the deity mentioned above", "as referenced in the
+          passage", or any reference outside the task string.
+
+      Tasks must span diverse analytical modes and be grounded in real scholarly complexity.
+      Generate as many tasks as the seed text richly supports.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      Start your response with [ and end it with ]. No other characters outside the array.
+
+  stage2:
+    system_prompt: |
+      OUTPUT FORMAT — READ FIRST:
+      Your response must be a single valid JSON array of strings. It must start with [ and end with ].
+      No preamble, no explanation, no reasoning, no markdown fences, no trailing text. Nothing else.
+
+      You are a senior comparative mythologist and cultural analyst. Decompose a complex
+      interpretive task into a rigorous, well-sequenced analytical plan.
+
+      Standards:
+      1. SELF-CONTAINED STEPS: Each step string must be fully understandable without the seed text.
+         Carry forward the myth name, deity, tradition, textual source, and analytical framework
+         into each step.
+      2. LOGICAL SEQUENCING: Textual evidence → structural pattern → cross-cultural comparison →
+         interpretation → scholarly counter-arguments → synthesis.
+      3. ATOMIC SCOPE: One distinct analytical sub-action per step.
+      4. HERMENEUTIC RIGOR: Include steps for identifying primary sources, examining multiple
+         interpretive frameworks, and accounting for cultural context.
+      5. STRICT NON-OVERLAP: Avoid absorbing concerns from sibling tasks.
+      6. CRITICAL PERSPECTIVE: At least one step must engage with a competing scholarly
+         interpretation or challenge the dominant reading.
+      7. ACTIONABLE ARTIFACTS: Each step produces a concrete output.
+
+      REMINDER: Output ONLY the JSON array. First character must be [. Last character must be ].
+    prompt_template: |
+      Create an analytical plan for the following mythology task.
+
+      Seed Text (background only — do NOT rely on this being available to future readers):
+      ---
+      {seed_text}
+      ---
+
+      Current Task to Plan:
+      "{current_task}"
+
+      Other Sibling Tasks (DO NOT overlap with these):
+      {other_tasks_json}
+
+      SELF-CONTAINMENT RULE: Each step string must be independently understandable by someone
+      who has only read the Current Task. Embed all necessary scholarly details (myth name,
+      tradition, primary source, analytical framework, comparative scope) directly into each step.
+      Never reference "the seed text", "the myth above", or "as described".
+
+      Generate a sequential plan with as many steps as the task genuinely requires.
+      Each step: 1-3 sentences, single sub-action.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      Start your response with [ and end it with ]. No other characters outside the array.
+
+  stage3_think:
+    system_prompt: |
+      You are a rigorous mythological reasoner. Before executing any analytical step, think
+      carefully about the interpretive challenge from a scholarly perspective.
+
+      FORMATTING REQUIREMENT:
+      You MUST structure your entire response using only the following format:
+      ##[Insert appropriate conceptual heading]-
+      [Insert detailed explanation, reasoning, and strategic outline here]
+
+      Thinking standards:
+      1. EXPLORE the exact interpretive question or cultural artifact in focus.
+      2. IDENTIFY relevant mythological traditions, primary texts, and prior step findings.
+      3. ANTICIPATE interpretive pitfalls — cultural anachronism, over-universalization,
+         cherry-picking of evidence.
+      4. OUTLINE your analytical approach — consider structuralist, Jungian, historical-critical,
+         and postcolonial lenses and select the most appropriate.
+      5. FLAG assumptions explicitly (e.g., "Assuming oral tradition predates written record here").
+
+      Write a free-form scholarly reasoning trace. This is internal scaffolding only.
+    prompt_template: |
+      Overall Mythology Task:
+      "{task}"
+
+      Current Step:
+      "{step}"
+
+      Immediate Context (Tail of Previous Step's Output):
+      ---
+      {previous_step_tail}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      Think carefully about the scholarly approach for this step. Do NOT write the final
+      interpretation yet — reason through the methodology and potential interpretive risks.
+      Use the required formatting:
+      ##Heading-
+      <explanation>
+
+  stage3_execute:
+    system_prompt: |
+      You are a rigorous comparative mythology analyst executing one step of a multi-step
+      interpretive plan. You have completed a thinking pass. Now produce the execution output.
+
+      Execution standards:
+      1. STRICT SCOPE: Execute ONLY the current analytical step.
+      2. USE OF CONTEXT: Reference specific prior findings (motifs identified, structural patterns
+         established, cultural parallels noted).
+      3. EVIDENCE-BASED: Ground every claim in primary textual evidence or established scholarly
+         consensus.
+      4. CONTRADICTION HANDLING: Name and reason through tensions with prior steps or competing
+         scholarly views.
+      5. INTERMEDIATE ARTIFACT: End with a labeled artifact (e.g., "Motif Inventory",
+         "Cross-Cultural Parallel Table", "Revised Symbolic Reading", "Counter-Argument Register").
+      6. CALIBRATED CONFIDENCE: Distinguish well-attested interpretations from speculative ones.
+    prompt_template: |
+      Overall Mythology Task:
+      "{task}"
+
+      Current Step to Execute:
+      "{step}"
+
+      Your Prior Thinking for This Step:
+      ---
+      {thinking}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Execute ONLY the current step. Write your full scholarly analysis and conclude with a
+      clearly labeled intermediate artifact.
+
+  stage3_execute_all:
+    system_prompt: |
+      You are a rigorous comparative mythology analyst. You have completed a dedicated thinking
+      pass for every step of the analytical plan. Now produce a unified, comprehensive scholarly
+      execution across all steps in a single pass.
+
+      Execution standards:
+      1. ADDRESS ALL STEPS IN ORDER: Work through each step sequentially. Clearly demarcate
+         each step section (e.g., "=== Step N: <description> ===").
+      2. USE THE THINKING: Each step's thinking has already selected the interpretive framework
+         — execute it. Reference the thinking conclusions directly rather than re-deriving them.
+      3. EVIDENCE-BASED: Ground every claim in primary textual evidence or established scholarly
+         consensus.
+      4. CROSS-STEP COHERENCE: Motifs identified, structural patterns, and cultural parallels
+         established in earlier steps must be explicitly built upon in later ones.
+      5. CONTRADICTION HANDLING: If executing a step reveals tension with an earlier step or
+         a competing scholarly view, name it and reason through it.
+      6. INTERMEDIATE ARTIFACTS: End each step section with a clearly labeled artifact
+         (e.g., "Motif Inventory", "Cross-Cultural Parallel Table", "Counter-Argument Register").
+      7. CALIBRATED CONFIDENCE: Distinguish well-attested interpretations from speculative ones.
+    prompt_template: |
+      Overall Mythology Task:
+      "{task}"
+
+      Complete Analytical Plan — All Steps:
+      {steps_json}
+
+      Thinking Output for Each Step:
+      ---
+      {all_thinking}
+      ---
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Using the thinking above, execute ALL steps of the analytical plan comprehensively and in
+      order. Clearly mark each step section. Conclude every step section with a labeled artifact.
+
+
+# ------------------------------------------------------------
+Law:
+  stage1:
+    system_prompt: |
+      OUTPUT FORMAT — READ FIRST:
+      Your response must be a single valid JSON array of strings. It must start with [ and end with ].
+      No preamble, no explanation, no reasoning, no markdown fences, no trailing text. Nothing else.
+
+      You are a world-class legal scholar and data curator specializing in generating rigorous,
+      intellectually demanding legal analysis tasks for training advanced AI systems. Your tasks
+      must challenge doctrinal reasoning, statutory interpretation, and multi-issue legal analysis
+      — not surface-level case recall.
+
+      Quality criteria:
+      1. SELF-CONTAINED: Each task string must be fully interpretable by someone who has never
+         seen the seed text. State the specific legal doctrine, statute, fact pattern, jurisdiction,
+         parties, and procedural posture explicitly within the task string.
+      2. DEPTH: Tasks must require substantive legal knowledge and multi-layered doctrinal reasoning.
+      3. DIVERSITY: Span distinct modes — statutory interpretation, constitutional analysis,
+         tort/contract/criminal law issue spotting, policy critique, comparative law, procedural
+         analysis, legislative drafting critique.
+      4. SPECIFICITY: Reference specific legal doctrines, statutes, or fact patterns with concrete
+         analytical constraints — all stated within the task string itself.
+      5. NON-OVERLAP: Target non-overlapping legal sub-issues.
+      6. REAL-WORLD GROUNDING: Frame as challenges a senior litigator, policy counsel, or
+         appellate judge would seriously grapple with.
+
+      REMINDER: Output ONLY the JSON array. First character must be [. Last character must be ].
+    prompt_template: |
+      Carefully read the following legal seed text and generate a set of distinct, expert-level
+      tasks that a senior attorney or legal scholar would find non-trivial to analyze.
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      SELF-CONTAINMENT RULE: Each task string must stand completely on its own. You must:
+        - Name the specific legal doctrine, statute (with section number), constitutional
+          provision, or case (with citation) explicitly within the task string.
+        - State the relevant fact pattern, parties, jurisdiction, and procedural posture.
+        - Specify the exact legal question and the form of the required output.
+        - Never use "the contract described", "the statute above", "the parties in the case",
+          or any reference outside the task string.
+
+      Tasks must span diverse legal reasoning modes and be grounded in real-world legal complexity.
+      Generate as many tasks as the seed text richly supports.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      Start your response with [ and end it with ]. No other characters outside the array.
+
+  stage2:
+    system_prompt: |
+      OUTPUT FORMAT — READ FIRST:
+      Your response must be a single valid JSON array of strings. It must start with [ and end with ].
+      No preamble, no explanation, no reasoning, no markdown fences, no trailing text. Nothing else.
+
+      You are a senior appellate attorney and legal strategist. Decompose a complex legal task
+      into a rigorous, well-sequenced analytical plan.
+
+      Standards:
+      1. SELF-CONTAINED STEPS: Each step must be fully understandable without the seed text.
+         Carry forward the statute, doctrine, fact pattern, jurisdiction, and standard of review
+         into each step that requires them.
+      2. LOGICAL SEQUENCING: Rule identification → rule explanation → application to facts →
+         counter-arguments → policy considerations → conclusion.
+      3. ATOMIC SCOPE: One distinct legal sub-issue or analytical action per step.
+      4. LEGAL RIGOR: Include steps for identifying the controlling standard, marshaling supporting
+         authority, anticipating the strongest counter-argument, and addressing policy implications.
+      5. STRICT NON-OVERLAP: Avoid absorbing concerns from sibling tasks.
+      6. ADVERSARIAL TESTING: At least one step must construct the strongest opposing argument.
+      7. ACTIONABLE ARTIFACTS: Each step produces a concrete output.
+
+      REMINDER: Output ONLY the JSON array. First character must be [. Last character must be ].
+    prompt_template: |
+      Create a legal analysis plan for the following task.
+
+      Seed Text (background only — do NOT rely on this being available to future readers):
+      ---
+      {seed_text}
+      ---
+
+      Current Task to Plan:
+      "{current_task}"
+
+      Other Sibling Tasks (DO NOT overlap with these):
+      {other_tasks_json}
+
+      SELF-CONTAINMENT RULE: Each step string must be independently understandable by someone
+      who has only read the Current Task. Embed all necessary legal details (statute name and
+      section, doctrine name, jurisdiction, standard of review, fact pattern summary) directly
+      into each step. Never reference "the seed text", "the contract above", or "as described".
+
+      Generate a sequential plan with as many steps as the task genuinely requires.
+      Each step: 1-3 sentences, single sub-issue.
+
+      YOUR ENTIRE RESPONSE MUST BE ONLY A VALID JSON ARRAY OF STRINGS.
+      Start your response with [ and end it with ]. No other characters outside the array.
+
+  stage3_think:
+    system_prompt: |
+      You are a rigorous legal reasoner. Before executing any analytical step, think carefully
+      about the legal problem from first principles.
+
+      FORMATTING REQUIREMENT:
+      You MUST structure your entire response using only the following format:
+      ##[Insert appropriate conceptual heading]-
+      [Insert detailed explanation, reasoning, and strategic outline here]
+
+      Thinking standards:
+      1. EXPLORE the exact legal issue or sub-issue in focus.
+      2. IDENTIFY relevant statutes, cases, and prior step findings.
+      3. ANTICIPATE where the legal argument is vulnerable — ambiguous statutory language,
+         circuit splits, unsettled common law, constitutional limits.
+      4. OUTLINE your analytical approach — IRAC, Chevron deference analysis, balancing test.
+      5. FLAG assumptions explicitly (e.g., "Assuming federal jurisdiction under 28 U.S.C. § 1331").
+
+      Write a free-form legal reasoning trace. This is internal scaffolding only.
+    prompt_template: |
+      Overall Legal Task:
+      "{task}"
+
+      Current Step:
+      "{step}"
+
+      Immediate Context (Tail of Previous Step's Output):
+      ---
+      {previous_step_tail}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text:
+      ---
+      {seed_text}
+      ---
+
+      Think carefully about the legal approach for this step. Do NOT write the final legal
+      argument yet — reason through the doctrinal strategy and potential weaknesses.
+      Use the required formatting:
+      ##Heading-
+      <explanation>
+
+  stage3_execute:
+    system_prompt: |
+      You are a rigorous legal analyst executing one step of a multi-step legal analysis plan.
+      You have completed a thinking pass. Now produce the execution output.
+
+      Execution standards:
+      1. STRICT SCOPE: Execute ONLY the current legal step.
+      2. USE OF CONTEXT: Explicitly invoke prior findings (identified rule, established facts,
+         prior counter-arguments evaluated).
+      3. AUTHORITY-GROUNDED: Ground every claim in statute, case law, or established doctrine.
+         Distinguish binding authority from persuasive authority from policy argument.
+      4. CONTRADICTION HANDLING: Name and reason through any tension with prior steps or contrary
+         authority.
+      5. INTERMEDIATE ARTIFACT: End with a labeled artifact (e.g., "Elements Checklist",
+         "Rule Statement", "Application Analysis", "Counter-Argument Evaluation",
+         "Policy Trade-off Table").
+      6. CALIBRATED CONFIDENCE: Distinguish settled law from contested doctrine from open questions.
+    prompt_template: |
+      Overall Legal Task:
+      "{task}"
+
+      Current Step to Execute:
+      "{step}"
+
+      Your Prior Thinking for This Step:
+      ---
+      {thinking}
+      ---
+
+      Accumulated Context from Prior Steps:
+      {accumulated_context}
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Execute ONLY the current step. Write your full legal analysis and conclude with a clearly
+      labeled intermediate artifact.
+
+  stage3_execute_all:
+    system_prompt: |
+      You are a rigorous legal analyst. You have completed a dedicated thinking pass for every
+      step of the legal analysis plan. Now produce a unified, comprehensive legal execution
+      across all steps in a single pass.
+
+      Execution standards:
+      1. ADDRESS ALL STEPS IN ORDER: Work through each step sequentially. Clearly demarcate
+         each step section (e.g., "=== Step N: <description> ===").
+      2. USE THE THINKING: Each step's thinking has already identified the controlling doctrine
+         and strategy — execute it. Reference thinking conclusions directly.
+      3. AUTHORITY-GROUNDED: Ground every claim in statute, case law, or established doctrine.
+         Distinguish binding authority from persuasive authority from policy argument.
+      4. CROSS-STEP COHERENCE: Identified rules, established facts, and evaluated counter-arguments
+         from earlier steps must be explicitly invoked in later ones.
+      5. CONTRADICTION HANDLING: If executing a step reveals a tension with an earlier step or
+         contrary authority, name it and resolve it.
+      6. INTERMEDIATE ARTIFACTS: End each step section with a clearly labeled artifact
+         (e.g., "Elements Checklist", "Application Analysis", "Policy Trade-off Table").
+      7. CALIBRATED CONFIDENCE: Distinguish settled law from contested doctrine from open questions.
+    prompt_template: |
+      Overall Legal Task:
+      "{task}"
+
+      Complete Legal Analysis Plan — All Steps:
+      {steps_json}
+
+      Thinking Output for Each Step:
+      ---
+      {all_thinking}
+      ---
+
+      Seed Text (primary source of truth):
+      ---
+      {seed_text}
+      ---
+
+      Using the thinking above, execute ALL steps of the legal analysis plan comprehensively
+      and in order. Clearly mark each step section. Conclude every step section with a labeled
+      artifact.

@@ -10,9 +10,10 @@
 set -euo pipefail
 
 # ─── EDIT THESE ─────────────────────────────────────────────────
-HEAD_IP="10.0.235.109"
+HEAD_IP="10.0.153.3"
 WORKER_IPS=(
-  "10.0.130.168"
+  "10.0.193.33"
+  "10.0.136.94"
   # add more here for 3+ nodes
 )
 # ────────────────────────────────────────────────────────────────
@@ -23,12 +24,12 @@ REPLICAS_PER_NODE=2
 GPUS_PER_REPLICA=4
 TENSOR_PARALLEL_SIZE=4
 
-SCRIPT_DIR="/fsx/pretraining_data/nauman/github/synthgen"
-LCG_DIR="/fsx/pretraining_data/nauman/github/long_context_generation"
-PIPELINE="${SCRIPT_DIR}/synthgen/pipelines/long_context.yaml"
-INPUT="${LCG_DIR}/codechef_final.jsonl"
-OUTPUT_DIR="${SCRIPT_DIR}/test_output_multinode"
-LIMIT="${2:-40}"      # default 40 seeds; override: bash launch_synthgen.sh head 100
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PIPELINE="${PIPELINE:-${REPO_ROOT}/examples/long_context/pipeline.yaml}"
+INPUT="${INPUT:-${REPO_ROOT}/examples/long_context/seeds.jsonl}"
+OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/out/cluster_$(date +%Y%m%d_%H%M%S)}"
+LIMIT="${2:-40}"      # default 40 seeds; override: bash scripts/launch_cluster.sh head 100
 
 export PATH="$HOME/miniconda3/bin:$HOME/.local/bin:$PATH"
 export HF_HOME="/opt/dlami/nvme"
@@ -145,7 +146,7 @@ case "$ROLE" in
     $RAY status || true
 
     mkdir -p "${OUTPUT_DIR}"
-    cd "${SCRIPT_DIR}"
+    cd "${REPO_ROOT}"
 
     echo ""
     echo "=== LAUNCHING synthgen on ${NUM_NODES} nodes × ${REPLICAS_PER_NODE} replicas/node = $((NUM_NODES * REPLICAS_PER_NODE)) replicas ==="
@@ -172,12 +173,37 @@ case "$ROLE" in
       --limit "${LIMIT}"
 
     echo ""
-    echo "=== Tearing down Ray on all nodes ==="
+    echo "=== Tearing down Ray + any vLLM orphans on all nodes ==="
+    # Ray stop first (graceful)
     $RAY stop --force 2>/dev/null || true
+    # Then hard-kill any orphaned vLLM / ray-worker processes that slipped through
+    pkill -9 -f 'ray::'       2>/dev/null || true
+    pkill -9 -f 'raylet'      2>/dev/null || true
+    pkill -9 -f 'gcs_server'  2>/dev/null || true
+    pkill -9 -f 'plasma_store' 2>/dev/null || true
+    pkill -9 -f 'vllm'        2>/dev/null || true
+    pkill -9 -f 'EngineCore'  2>/dev/null || true
+
     for W in "${WORKER_IPS[@]}"; do
-      ssh -o StrictHostKeyChecking=no "$W" "\$HOME/miniconda3/bin/ray stop --force" 2>/dev/null || true &
+      ssh -o StrictHostKeyChecking=no "$W" \
+        "\$HOME/miniconda3/bin/ray stop --force 2>/dev/null; \
+         pkill -9 -f 'ray::'       2>/dev/null; \
+         pkill -9 -f 'raylet'      2>/dev/null; \
+         pkill -9 -f 'gcs_server'  2>/dev/null; \
+         pkill -9 -f 'plasma_store' 2>/dev/null; \
+         pkill -9 -f 'vllm'        2>/dev/null; \
+         pkill -9 -f 'EngineCore'  2>/dev/null; \
+         true" 2>/dev/null || true &
     done
     wait
+    sleep 2
+
+    echo "=== Post-teardown GPU state ==="
+    echo "[HEAD]"; nvidia-smi --query-gpu=index,memory.used --format=csv,noheader | head -8
+    for W in "${WORKER_IPS[@]}"; do
+      echo "[${W}]"
+      ssh -o StrictHostKeyChecking=no "$W" "nvidia-smi --query-gpu=index,memory.used --format=csv,noheader | head -8"
+    done
     echo "=== Done. Output: ${OUTPUT_DIR}/out.jsonl ==="
     ;;
 

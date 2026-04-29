@@ -1,0 +1,10 @@
+name: long_context
+flow: think_execute
+
+flow_config:
+  mode: mode2
+  target_output_tokens: 131072
+  context_window: 131072
+  # Relative to this YAML file (resolved against the pipeline's directory).
+  instruction_path: instruction.yaml
+  category: Code
