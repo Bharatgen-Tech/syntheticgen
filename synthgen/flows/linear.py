@@ -95,6 +95,8 @@ class LinearFlow:
             "seed_id": seed_id,
             "stage": stage.name,
             "data": result,
+            "rendered_prompt": prompt,
+            "rendered_system_prompt": system_prompt,
         })
         return result
 

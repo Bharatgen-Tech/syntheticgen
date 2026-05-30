@@ -39,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Debug JSONL (every stage call)")
     run.add_argument("--limit", type=_clean_int, default=0,
                      help="Process first N seeds (0 = all)")
+    run.add_argument("--min_chunk_words", type=_clean_int, default=0,
+                     help="Drop chunks under this word count after chunking "
+                          "(0 = no filter). Useful to skip fragmentary inputs "
+                          "that the model would inflate into pseudo-classical "
+                          "answers. Recommended: 100 for blog-heavy corpora.")
 
     # Model
     run.add_argument("--model", required=True, help="Model path or HF id")
@@ -55,7 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # vLLM
     run.add_argument("--tensor_parallel_size", type=_clean_int, default=4)
-    run.add_argument("--gpus_per_replica", type=_clean_int, default=4)
+    run.add_argument("--gpus_per_replica", type=_clean_int, default=None,
+                     help="GPUs reserved per Ray replica. Defaults to "
+                          "tensor_parallel_size; only set this explicitly for "
+                          "pipeline parallelism (gpus_per_replica = tp * pp).")
     run.add_argument("--gpu_memory_utilization", type=float, default=0.90)
     run.add_argument("--max_num_seqs", type=_clean_int, default=512)
     run.add_argument("--enforce_eager", action="store_true")
@@ -71,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run(args) -> None:
+    if args.gpus_per_replica is None:
+        args.gpus_per_replica = args.tensor_parallel_size
     pipeline = Pipeline.from_yaml(args.pipeline)
     print(f"[INFO] Pipeline: {pipeline.name} (flow={pipeline.flow_name}, "
           f"{len(pipeline.stages)} stages)")
@@ -93,6 +103,11 @@ def _validate(path: str) -> int:
 
     print(f"Loaded '{pipeline.name}' (flow={pipeline.flow_name}, "
           f"{len(pipeline.stages)} stage(s))")
+    if pipeline.chunking.mode != "full":
+        print(f"  chunking: mode={pipeline.chunking.mode} "
+              f"size={pipeline.chunking.chunk_size} "
+              f"overlap={pipeline.chunking.overlap} "
+              f"field={pipeline.chunking.field!r}")
 
     # 1. Flow must be registered.
     if pipeline.flow_name not in FLOWS:

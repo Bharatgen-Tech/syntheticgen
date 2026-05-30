@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from .engine import InferenceEngine, RayNativeEngine
 from .writer import AsyncBufferedWriter
-from .pipeline import Pipeline
+from .pipeline import ChunkingSpec, Pipeline
 
 try:
     import ray
@@ -121,8 +121,62 @@ def _build_engine(args) -> RayNativeEngine:
     )
 
 
-def _load_seeds(input_path: str) -> list[tuple[str, dict]]:
-    """Load seeds from JSONL. Returns [(seed_id, record), ...]."""
+def _chunk_words(text: str, size: int, overlap: int) -> list[str]:
+    """Split text into ~size-word chunks with `overlap` words of overlap."""
+    words = text.split()
+    if len(words) <= size:
+        return [text]
+    step = size - overlap
+    chunks: list[str] = []
+    start = 0
+    while start < len(words):
+        chunks.append(" ".join(words[start:start + size]))
+        if start + size >= len(words):
+            break
+        start += step
+    return chunks
+
+
+def _expand_with_chunking(
+    base_id: str, record: dict, spec: ChunkingSpec,
+) -> list[tuple[str, dict]]:
+    """Expand one input record into 1..N (seed_id, record) pairs per `spec`."""
+    if spec.mode == "full":
+        return [(base_id, record)]
+
+    text = record.get(spec.field, "")
+    chunks = _chunk_words(text, spec.chunk_size, spec.overlap)
+    out: list[tuple[str, dict]] = []
+
+    if spec.mode == "both":
+        full_rec = dict(record)
+        full_rec["source_id"] = base_id
+        out.append((f"{base_id}__full", full_rec))
+
+    # If the input is short enough that chunking is a no-op, skip emitting a
+    # duplicate chunk record in 'both' mode.
+    if spec.mode == "both" and len(chunks) == 1:
+        return out
+
+    for i, chunk in enumerate(chunks):
+        rec = dict(record)
+        rec[spec.field] = chunk
+        rec["source_id"] = base_id
+        rec["chunk_index"] = i
+        rec["chunk_total"] = len(chunks)
+        out.append((f"{base_id}__chunk_{i:03d}", rec))
+    return out
+
+
+def _load_seeds(
+    input_path: str, chunking: Optional[ChunkingSpec] = None,
+) -> list[tuple[str, dict]]:
+    """Load seeds from JSONL. Returns [(seed_id, record), ...].
+
+    If `chunking` is set and its mode != 'full', each input row is expanded
+    into one or more chunked seeds before returning.
+    """
+    spec = chunking or ChunkingSpec()
     seeds: list[tuple[str, dict]] = []
     seen_ids: dict[str, int] = {}
 
@@ -144,8 +198,10 @@ def _load_seeds(input_path: str) -> list[tuple[str, dict]]:
                       or "sha1_" + hashlib.sha1(text.encode("utf-8")).hexdigest()[:16])
             n = seen_ids.get(raw_id, 0)
             seen_ids[raw_id] = n + 1
-            seed_id = raw_id if n == 0 else f"{raw_id}__{n}"
-            seeds.append((seed_id, record))
+            base_id = raw_id if n == 0 else f"{raw_id}__{n}"
+
+            for seed_id, rec in _expand_with_chunking(base_id, record, spec):
+                seeds.append((seed_id, rec))
     return seeds
 
 
@@ -177,8 +233,24 @@ async def run(args, pipeline: Pipeline) -> None:
     so a fully-resumed run skips the expensive vLLM warmup entirely.
     """
     # ── Seeds + resume (no GPU needed) ─────────────────────────────────────
-    seeds = _load_seeds(args.input)
+    seeds = _load_seeds(args.input, pipeline.chunking)
+    if pipeline.chunking.mode != "full":
+        print(f"[INFO] Chunking mode={pipeline.chunking.mode} "
+              f"size={pipeline.chunking.chunk_size} "
+              f"overlap={pipeline.chunking.overlap} "
+              f"field={pipeline.chunking.field!r}")
     print(f"[INFO] Loaded {len(seeds):,} seeds from '{args.input}'")
+
+    if args.min_chunk_words and args.min_chunk_words > 0:
+        field = pipeline.chunking.field if pipeline.chunking.mode != "full" else "text"
+        before = len(seeds)
+        seeds = [(sid, rec) for sid, rec in seeds
+                 if len(rec.get(field, "").split()) >= args.min_chunk_words]
+        dropped = before - len(seeds)
+        print(f"[INFO] min_chunk_words={args.min_chunk_words} — "
+              f"dropped {dropped:,} chunks under floor "
+              f"({100*dropped/before:.1f}% of {before:,}); "
+              f"{len(seeds):,} remaining.")
 
     completed = _load_completed(args.output)
     if completed:

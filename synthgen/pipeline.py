@@ -59,12 +59,46 @@ class StageSpec:
 
 
 @dataclass
+class ChunkingSpec:
+    """Optional input-text chunking applied by the runner before stages execute.
+
+    mode:
+      full   no chunking (default; equivalent to omitting the block)
+      chunk  split each seed's `field` into smaller pieces
+      both   emit the original seed AND its chunks
+
+    Sizes are in whitespace-separated words. Overlap must be < chunk_size.
+    """
+    mode: str = "full"
+    chunk_size: int = 300
+    overlap: int = 50
+    field: str = "text"
+
+    @classmethod
+    def from_dict(cls, d: Optional[dict]) -> "ChunkingSpec":
+        if not d:
+            return cls()
+        mode = d.get("mode", "full")
+        if mode not in ("full", "chunk", "both"):
+            raise ValueError(f"chunking.mode must be full|chunk|both, got '{mode}'")
+        size = int(d.get("chunk_size", 300))
+        overlap = int(d.get("overlap", 50))
+        if mode != "full":
+            if size <= 0:
+                raise ValueError("chunking.chunk_size must be > 0")
+            if overlap < 0 or overlap >= size:
+                raise ValueError("chunking.overlap must be >= 0 and < chunk_size")
+        return cls(mode=mode, chunk_size=size, overlap=overlap, field=d.get("field", "text"))
+
+
+@dataclass
 class Pipeline:
     name: str
     flow_name: str
     stages: list[StageSpec]
     merge_template: Optional[str]
     flow_config: dict
+    chunking: ChunkingSpec
     _base_dir: str
 
     _flow_cached: Any = None
@@ -97,6 +131,7 @@ class Pipeline:
             stages=stages,
             merge_template=merge_template,
             flow_config=data.get("flow_config", {}),
+            chunking=ChunkingSpec.from_dict(data.get("chunking")),
             _base_dir=base_dir,
         )
 
@@ -104,8 +139,12 @@ class Pipeline:
 def render_template(template: str, context: dict) -> str:
     """Simple {var} and {nested.field} substitution. No expressions, no loops.
 
+    Dicts and lists are JSON-serialized (rather than str(repr)) so structured
+    stage outputs can be passed through merge templates as valid JSON.
+
     For more, use a real templating engine. Kept minimal to avoid surprises.
     """
+    import json
     import re
 
     def resolve(key: str) -> str:
@@ -116,6 +155,10 @@ def render_template(template: str, context: dict) -> str:
                 val = val.get(p, "")
             else:
                 val = getattr(val, p, "")
-        return "" if val is None else str(val)
+        if val is None:
+            return ""
+        if isinstance(val, (dict, list)):
+            return json.dumps(val, ensure_ascii=False)
+        return str(val)
 
     return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_.]*)\}", lambda m: resolve(m.group(1)), template)
