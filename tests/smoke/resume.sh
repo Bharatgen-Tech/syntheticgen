@@ -27,7 +27,6 @@ RUN() {
     --intermediate "${OUT_DIR}/debug.jsonl" \
     --num_replicas 1 \
     --tensor_parallel_size 4 \
-    --gpus_per_replica 4 \
     --gpu_memory_utilization 0.92 \
     --max_num_seqs 128 \
     --max_workers 8 \

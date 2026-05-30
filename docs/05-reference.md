@@ -34,7 +34,7 @@ synthgen run <pipeline.yaml> [flags...]       # run the pipeline
 |---|---|---|
 | `--tensor_parallel_size` | 4 | GPUs per vLLM replica |
 | `--num_replicas` | 1 | Single-node replica count (multi-node uses `num_nodes × replicas_per_node`) |
-| `--gpus_per_replica` | 4 | GPU slice per replica |
+| `--gpus_per_replica` | = `tensor_parallel_size` | GPU slice reserved per Ray replica. Defaults to `tensor_parallel_size`; only set explicitly for pipeline parallelism (`tp × pp`). |
 | `--gpu_memory_utilization` | 0.90 | vLLM GPU memory target |
 | `--max_num_seqs` | 512 | Max concurrent sequences per engine |
 | `--enforce_eager` | off | Disable CUDA graphs. Required for MoE + hybrid-attention models like Qwen3-Coder-Next. Costs 20-40% throughput. |

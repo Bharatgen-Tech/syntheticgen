@@ -25,6 +25,30 @@ Takes ~1-2 minutes after the model loads. Output at `out/qa.jsonl`.
 
 That's it. No code changes.
 
+## Chunking long documents
+
+Chunking is built into the pipeline — no preprocessing step. Add a `chunking:`
+block to [`pipeline.yaml`](pipeline.yaml) and the runner expands each input row
+into one or more chunked seeds before stages execute:
+
+```yaml
+chunking:
+  mode: chunk        # full | chunk | both
+  chunk_size: 300    # words per chunk
+  overlap: 50        # word overlap between chunks
+  field: text        # which field to chunk (default: text)
+```
+
+Modes:
+- `full` — passthrough, one row → one seed (default; chunking off)
+- `chunk` — split each row's `field` into smaller chunks
+- `both` — emit the full row AND its chunks (QA at both granularities)
+
+Each chunked seed carries `source_id`, `chunk_index`, `chunk_total` so you can
+group results back to the original document. Seed IDs get a `__chunk_NNN`
+suffix (and `__full` for the original in `both` mode), so resume still works
+correctly across reruns.
+
 ## Files
 
 - `pipeline.yaml` — the pipeline spec

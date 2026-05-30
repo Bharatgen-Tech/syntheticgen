@@ -46,7 +46,7 @@ synthgen run my_pipelines/summary.yaml \
   --input seeds.jsonl \
   --output out/summaries.jsonl \
   --intermediate out/debug.jsonl \
-  --num_replicas 1 --tensor_parallel_size 4 --gpus_per_replica 4 \
+  --num_replicas 1 --tensor_parallel_size 4 \
   --enforce_eager
 ```
 

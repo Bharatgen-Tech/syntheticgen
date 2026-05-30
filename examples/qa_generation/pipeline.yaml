@@ -6,6 +6,18 @@ flow: linear
 # as evidence. Demonstrates fanout (3 concepts per seed → 3 QA calls in parallel)
 # and JSON parsing.
 
+# Optional: chunk long source documents before processing.
+#   mode: full   one seed per input row (default; chunking off)
+#         chunk  split each row's `field` into smaller pieces
+#         both   emit the original row AND its chunks
+# Sizes are in whitespace-separated words. Each chunk becomes its own seed
+# and carries source_id / chunk_index / chunk_total back to the original row.
+chunking:
+  mode: full
+  chunk_size: 300
+  overlap: 50
+  field: text
+
 stages:
   - name: concepts
     system_prompt: "You are a meticulous reader."

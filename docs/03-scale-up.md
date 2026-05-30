@@ -11,8 +11,7 @@ synthgen run my_pipeline.yaml \
   --output out/corpus.jsonl \
   --intermediate out/debug.jsonl \
   --num_replicas 2 \              # two vLLM engines on this node
-  --tensor_parallel_size 4 \      # each engine uses 4 GPUs
-  --gpus_per_replica 4 \
+  --tensor_parallel_size 4 \      # each engine uses 4 GPUs (gpus_per_replica defaults to this)
   --gpu_memory_utilization 0.92 \
   --max_workers 256 \
   --max_seed_concurrency 128 \

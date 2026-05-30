@@ -26,7 +26,6 @@ python3 -m synthgen.cli run "${SCRIPT_DIR}/pipeline.yaml" \
   --limit "${LIMIT}" \
   --num_replicas 2 \
   --tensor_parallel_size 4 \
-  --gpus_per_replica 4 \
   --gpu_memory_utilization 0.92 \
   --max_num_seqs 512 \
   --max_workers 256 \
