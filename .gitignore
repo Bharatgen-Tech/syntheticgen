@@ -14,9 +14,14 @@ test_output/
 test_output_*/
 output/
 examples/*/out/
+examples/*/out*/
+examples/*/output*/
 tests/smoke/out*/
 *.jsonl.tmp
-
+examples/*/*.log
+examples/data/*.jsonl
+test.jsonl
+ex
 # IDE / editors
 .vscode/
 .idea/
